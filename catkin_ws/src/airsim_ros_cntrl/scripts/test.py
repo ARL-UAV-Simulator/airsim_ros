@@ -30,9 +30,34 @@ if __name__ == "__main__":
             break
     '''
 
+    vehicle_list = ["Drone0", "Drone1"]
+    
+    import rospy
 
-    drone = hrlsim.drone.Agent("Team0", drone_name, controllerType=hrlsim.controller.LQR, trajType=hrlsim.traj.MinimumSnap)
-    drone.start()
+    team = hrlsim.Team(hrlsim.traj.MinimumSnap, "team", vehicle_list, None)
+
+
+    rospy.init_node("team_test")
+    rospy.on_shutdown(team.shutdown)
+    team.setup_ros()
+
+    rospy.sleep(1)
+
+
+
+    #team.takeoff(False)
+    #rospy.sleep(3)
+    team.moveInFormation([0,0,-10], 0.5)
+    team.shutdown()
+
+    print("PARENT SHUTTING DOWN")
+
+
+    
+    
+    
+    #drone = hrlsim.drone.Agent("Team0", drone_name, controllerType=hrlsim.controller.LQR, trajType=hrlsim.traj.MinimumSnap)
+    #drone.start()
 
     #plotter = hrlsim.Plotter(nrows=1, ncols=2, windowSize=15, title="Trajectory components", subtitles=["X & Y Components", "Z Component"], xlabels=["t (Seconds)", "t (Seconds)"], ylabels=["m (Meters)", "m (Meters)"])
     

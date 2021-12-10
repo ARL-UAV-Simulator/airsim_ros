@@ -86,7 +86,7 @@ class DroneInfo:
         self.subs = subs
         self.services = services
         self.actions = actions
-        self.state = hrlsim.airsim.Multirotor()
+        self.state = Multirotor()
 
 
 class Drone(Process):
@@ -134,7 +134,7 @@ class Drone(Process):
         self.stop_msg = VelCmd()
 
         self.cmd = None
-        self.cmd_timeout = 0.1
+        self.cmd_timeout = 0.2
 
         self.trajType = trajType
         self.controller = controllerType(trajType, self.maxThrust, self.mass)
@@ -163,6 +163,7 @@ class Drone(Process):
         rospy.Subscriber(lowlevel_topic_prefix + "/global_gps", NavSatFix, callback=self.gps_cb)
         rospy.Subscriber(lowlevel_topic_prefix + "/odom_local_ned", Odometry, callback=self.odom_cb)
         rospy.Subscriber(topic_prefix + "/vel_cmd_body_frame", VelCmd, callback=self.vel_cmd_body_frame_cb, queue_size=1)
+        rospy.Subscriber(topic_prefix + "/angle_throttle_cmd", TwistStamped, callback=self.angle_throttle_cb, queue_size=1)
 
         # Published action servers
         self.moveToLocationActionServer = actionlib.SimpleActionServer(
@@ -176,6 +177,7 @@ class Drone(Process):
         # Published topics
         self.vel_cmd_pub            = rospy.Publisher(lowlevel_topic_prefix + "/vel_cmd_body_frame", VelCmd, queue_size=2)
         self.throttle_rates_cmd_pub = rospy.Publisher(lowlevel_topic_prefix + "/throttle_rates_cmd", TwistStamped, queue_size=2)
+        self.angle_throttle_cmd_pub = rospy.Publisher(lowlevel_topic_prefix + "/angle_throttle_cmd", TwistStamped, queue_size=2)
         self.multirotor_pub         = rospy.Publisher(topic_prefix+"/multirotor", Multirotor, queue_size=2)
         self.__desired_pose_pub     = rospy.Publisher(topic_prefix + "/lqr/desired_pose", PoseStamped, queue_size=2)
         self.__desired_vel_pub      = rospy.Publisher(topic_prefix + "/lqr/desired_vel", TwistStamped, queue_size=2)
@@ -292,7 +294,15 @@ class Drone(Process):
         self.resetCmdTimer()
         self.cmd_timer = rospy.Timer(rospy.Duration(self.cmd_timeout), self.cmd_timer_cb, oneshot=True)
 
-
+        
+    def angle_throttle_cb(self, msg):
+        """
+        Send to API wrapper
+        """
+        self.state.landed_state = hrlsim.airsim.LandedState.Flying
+        self.cmd = msg
+        self.resetCmdTimer()
+        self.cmd_timer = rospy.Timer(rospy.Duration(self.cmd_timeout), self.cmd_timer_cb, oneshot=True)
     #
     ###################################
     #
@@ -507,6 +517,7 @@ class Drone(Process):
         rate = rospy.Rate(self.freq)
 
         first = True
+        self.cmd = None
 
         while not rospy.is_shutdown() and self._shutdown == False:
             self.publish_multirotor_state(self.state, self.sensors)
@@ -524,13 +535,13 @@ class Drone(Process):
                     fc = np.zeros((3,3))
 
                     if first:
-                        self.controller.setGoals(waypoints, ic, fc, 1.0)
+                        self.controller.setGoals(waypoints, ic, fc, 0.5)
                         first = False
+                        self.t0 = rospy.get_time()
                     
-                    self.t0 = rospy.get_time()
                     self.move(self.t0, self.state)
-
                 else:
+                    first = False
                     pass
                     #self.vel_cmd_pub.publish(self.stop_msg)
 
@@ -538,15 +549,20 @@ class Drone(Process):
                 first = True
                 self.vel_cmd_pub.publish(self.cmd)
 
-            elif isinstance(self.cmd, Takeoff):
+            elif isinstance(self.cmd, TwistStamped):
                 first = True
-                self.takeoff()
-                self.cmd == None
+                self.angle_throttle_cmd_pub.publish(self.cmd)
+
+            elif isinstance(self.cmd, Takeoff):
+                if not first:
+                    print(self.drone_name + " taking off")
+                    self.takeoff()
+                    first = True
 
             elif isinstance(self.cmd, Land):
-                first = True
-                self.land()
-                self.cmd == None
+                if not first:
+                    first = True
+                    self.land()
 
             elif isinstance(self.cmd, MoveToLocationGoal):
                 first = True

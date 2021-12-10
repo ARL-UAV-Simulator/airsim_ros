@@ -25,7 +25,8 @@ class LQR(controller.Controller):
         """
         super().__init__(trajType, maxThrust, mass)
 
-        self.Qa = np.diag([100.0, 100.0, 100.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0,5.0,5.0,10.0])
+        #self.Qa = np.diag([100.0, 100.0, 100.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0,5.0,5.0,10.0])
+        self.Qa = np.diag([100.0, 100.0, 100.0, 1.0, 1.0, 1.0, 1.0, 10.0, 10.0, 10.0,0.1,0.1,0.1])
         self.R = np.diag([1.0, 1.0, 2.0e1, 1.0])
         self.C = np.block([[np.eye(3.0), np.zeros((3,7))]])
 

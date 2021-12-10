@@ -169,6 +169,9 @@ void AirsimROSWrapper::create_ros_pubs_from_settings_json()
             // bind multiple topics to a single callback, but keep track of which vehicle name it was by passing curr_vehicle_name as the 2nd argument 
             drone->throttle_rates_cmd_sub = nh_private_.subscribe<geometry_msgs::TwistStamped>(curr_vehicle_name + "/throttle_rates_cmd", 1,
                 boost::bind(&AirsimROSWrapper::throttle_rates_cmd_cb, this, _1, vehicle_ros->vehicle_name)); 
+            drone->angle_throttle_cmd_sub = nh_private_.subscribe<geometry_msgs::TwistStamped>(curr_vehicle_name + "/angle_throttle_cmd", 1,
+                boost::bind(&AirsimROSWrapper::angle_throttle_cmd_cb, this, _1, vehicle_ros->vehicle_name));
+
             drone->vel_cmd_body_frame_sub = nh_private_.subscribe<airsim_ros_pkgs::VelCmd>(curr_vehicle_name + "/vel_cmd_body_frame", 1, 
                 boost::bind(&AirsimROSWrapper::vel_cmd_body_frame_cb, this, _1, vehicle_ros->vehicle_name)); // todo ros::TransportHints().tcpNoDelay();
             drone->vel_cmd_world_frame_sub = nh_private_.subscribe<airsim_ros_pkgs::VelCmd>(curr_vehicle_name + "/vel_cmd_world_frame", 1, 
@@ -452,7 +455,7 @@ bool AirsimROSWrapper::reset_srv_cb(airsim_ros_pkgs::Reset::Request& request, ai
 {
     std::lock_guard<std::mutex> guard(drone_control_mutex_);
 
-    airsim_client_.reset();
+    airsim_client_->reset();
     return true; //todo
 }
 
@@ -511,6 +514,19 @@ void AirsimROSWrapper::throttle_rates_cmd_cb(const geometry_msgs::TwistStamped::
     drone->throttle_rates_cmd.r = msg->twist.angular.z;
     drone->throttle_rates_cmd.throttle = msg->twist.linear.z;
     drone->has_throttle_rates_cmd = true;
+}
+
+
+void AirsimROSWrapper::angle_throttle_cmd_cb(const geometry_msgs::TwistStamped::ConstPtr& msg, const std::string& vehicle_name) {
+    std::lock_guard<std::mutex> guard(drone_control_mutex_);
+
+    auto drone = static_cast<MultiRotorROS*>(vehicle_name_ptr_map_[vehicle_name].get());
+
+    drone->angle_throttle_cmd.r = msg->twist.angular.x;
+    drone->angle_throttle_cmd.p = msg->twist.angular.y;
+    drone->angle_throttle_cmd.y = msg->twist.angular.z;
+    drone->angle_throttle_cmd.throttle = msg->twist.linear.z;
+    drone->has_angle_throttle_cmd = true;
 }
 
 
@@ -1240,6 +1256,14 @@ void AirsimROSWrapper::update_commands()
                     drone->throttle_rates_cmd.throttle, vel_cmd_duration_, drone->vehicle_name);
             }
             drone->has_throttle_rates_cmd = false;
+
+            if(drone->has_angle_throttle_cmd)
+            {
+                std::lock_guard<std::mutex> guard(drone_control_mutex_);
+                static_cast<msr::airlib::MultirotorRpcLibClient*>(airsim_client_.get())->moveByRollPitchYawThrottleAsync(drone->angle_throttle_cmd.r, drone->angle_throttle_cmd.p, drone->angle_throttle_cmd.y,
+                    drone->angle_throttle_cmd.throttle, vel_cmd_duration_, drone->vehicle_name);
+            }
+            drone->has_angle_throttle_cmd = false;
         }
         else
         {

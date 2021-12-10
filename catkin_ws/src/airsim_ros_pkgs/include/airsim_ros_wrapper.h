@@ -116,6 +116,12 @@ struct ThrottleRatesCmd
     std::string vehicle_name;
 };
 
+struct AngleThrottleCmd
+{
+    double r,p,y,throttle;
+    std::string vehicle_name;
+};
+
 struct GimbalCmd
 {
     std::string vehicle_name;
@@ -210,15 +216,18 @@ private:
         // bool in_air_; // todo change to "status" and keep track of this
 
         ros::Subscriber throttle_rates_cmd_sub;
+        ros::Subscriber angle_throttle_cmd_sub;
+
         ros::Subscriber vel_cmd_body_frame_sub;
         ros::Subscriber vel_cmd_world_frame_sub;
 
         ros::ServiceServer takeoff_srvr;
         ros::ServiceServer land_srvr;
 
-        bool has_vel_cmd, has_throttle_rates_cmd;
+        bool has_vel_cmd, has_throttle_rates_cmd, has_angle_throttle_cmd;
         VelCmd vel_cmd;
         ThrottleRatesCmd throttle_rates_cmd;
+        AngleThrottleCmd angle_throttle_cmd;
 
         /// Status
         // bool in_air_; // todo change to "status" and keep track of this
@@ -231,6 +240,8 @@ private:
 
     /// ROS subscriber callbacks
     void throttle_rates_cmd_cb(const geometry_msgs::TwistStamped::ConstPtr& msg, const std::string& vehicle_name);
+    void angle_throttle_cmd_cb(const geometry_msgs::TwistStamped::ConstPtr& msg, const std::string& vehicle_name);
+    
     void vel_cmd_world_frame_cb(const airsim_ros_pkgs::VelCmd::ConstPtr& msg, const std::string& vehicle_name);
     void vel_cmd_body_frame_cb(const airsim_ros_pkgs::VelCmd::ConstPtr& msg, const std::string& vehicle_name);
 

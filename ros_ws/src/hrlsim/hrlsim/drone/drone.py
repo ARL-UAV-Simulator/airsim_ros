@@ -133,14 +133,14 @@ class Drone(Node):
         """
         airsim_prefix = "/airsim_node/" + self.drone_name
 
-        cbGroup = ReentrantCallbackGroup()
+        self.cbGroup = ReentrantCallbackGroup()
 
         # Subscribed topics
-        self.create_subscription(GPSYaw, "/airsim_node/origin_geo_point", self.get_origin_cb, 10, callback_group=cbGroup)
-        self.create_subscription(Imu, airsim_prefix + "/imu/imu0", self.imu_cb, 10, callback_group=cbGroup)
-        self.create_subscription(NavSatFix, airsim_prefix + "/global/gps", self.gps_cb, 10, callback_group=cbGroup)
-        self.create_subscription(Odometry, airsim_prefix + "/odom/local_ned", self.odom_cb, 10, callback_group=cbGroup)
-        self.create_subscription(VelCmd, "~/vel_cmd_body_frame", self.vel_cmd_body_frame_cb, 10, callback_group=cbGroup)
+        self.create_subscription(GPSYaw, "/airsim_node/origin_geo_point", self.get_origin_cb, 10, callback_group=self.cbGroup)
+        self.create_subscription(Imu, airsim_prefix + "/imu/imu0", self.imu_cb, 10, callback_group=self.cbGroup)
+        self.create_subscription(NavSatFix, airsim_prefix + "/global_gps", self.gps_cb, 10, callback_group=self.cbGroup)
+        self.create_subscription(Odometry, airsim_prefix + "/odom_local_ned", self.odom_cb, 10, callback_group=self.cbGroup)
+        self.create_subscription(VelCmd, "~/vel_cmd_body_frame", self.vel_cmd_body_frame_cb, 10, callback_group=self.cbGroup)
 
         # Published action servers
         self.moveToLocationActionServer = ActionServer(
@@ -148,34 +148,30 @@ class Drone(Node):
             MoveToLocation,
             "~/move_to_location",
             self.move_to_location_cb,
-            callback_group=cbGroup
+            callback_group=self.cbGroup
         )
 
 
         # Published topics
-        self.vel_cmd_pub            = self.create_publisher(VelCmd, "~/vel_cmd_body_frame", 2)
-        self.throttle_rates_cmd_pub = self.create_publisher(TwistStamped, "~/throttle_rates_cmd", 2)
+        self.vel_cmd_pub            = self.create_publisher(VelCmd, airsim_prefix + "/vel_cmd_body_frame", 2)
+        self.throttle_rates_cmd_pub = self.create_publisher(TwistStamped, airsim_prefix + "/throttle_rates_cmd", 2)
         self.multirotor_pub         = self.create_publisher(Multirotor, "~/multirotor", 2)
         self.desired_pose_pub     = self.create_publisher(PoseStamped, "~/lqr/desired_pose", 2)
         self.desired_vel_pub      = self.create_publisher(TwistStamped, "~/lqr/desired_vel", 2)
         
         # Published services
-        self.create_service(SetBool, "~/shutdown", self.shutdown_cb, callback_group=cbGroup)
-        self.create_service(Takeoff, "~/takeoff", self.takeoff_cb, callback_group=cbGroup)
-        self.create_service(Land, "~/land", self.land_cb, callback_group=cbGroup)
+        self.create_service(SetBool, "~/shutdown", self.shutdown_cb, callback_group=self.cbGroup)
+        self.create_service(Takeoff, "~/takeoff", self.takeoff_cb, callback_group=self.cbGroup)
+        self.create_service(Land, "~/land", self.land_cb, callback_group=self.cbGroup)
 
         # Subscribed services
         self.takeoff    = self.create_client(Takeoff, airsim_prefix + "/takeoff")
         self.land       = self.create_client(Land, airsim_prefix + "/land")
 
-        self.cmd_timer = self.create_timer(self.cmd_timeout, self.cmd_timer_cb, callback_group=cbGroup)
+        self.cmd_timer = self.create_timer(self.cmd_timeout, self.cmd_timer_cb, callback_group=self.cbGroup)
         self.cmd_timer.cancel()
 
-        self.loop_timer = self.create_timer(1/self.freq, self.loop, callback_group=cbGroup)
-
-        self.executor = MultiThreadedExecutor(4)#executor
-        if self.executor != None:
-            self.exector.add_node(self)
+        self.loop_timer = self.create_timer(1/self.freq, self.loop, callback_group=self.cbGroup)
 
     #
     ###################################
@@ -349,11 +345,8 @@ class Drone(Node):
             tnow = self.get_clock().now().nanoseconds/1e9
             feedback.time_left = tnow-self.t0
 
-
-            self.get_logger().info("Waiting at rate")
-
-            r.sleep()
-            #time.sleep(1/self.freq)
+            time.sleep(1/self.freq)
+            #r.sleep()
 
         self.cmd = None
 
@@ -470,7 +463,8 @@ class Drone(Node):
             state (MultirotorState): Current Multirotor State
         """
 
-        x0, u = self.controller.computeControl(self.get_clock().now().nanoseconds/1e9, t0, self.actual_loop_time, state, self.drone_name)
+        t = self.get_clock().now().nanoseconds/1e9
+        x0, u = self.controller.computeControl(t, t0, self.actual_loop_time, state, self.drone_name)
 
         # Bound control output to +/- 2 [rad/s]
         u = np.maximum(u, -2*np.ones(u.shape))
@@ -500,36 +494,36 @@ class Drone(Node):
         desired_vel_msg.twist.angular = Vector3(x=wp, y=wq, z=wr)
         self.desired_vel_pub.publish(desired_vel_msg)
 
+        msg = "zD: {:6.2f}, z: {:6.2f}, wp: {:6.2f}, wq: {:6.2f}, wr: {:6.2f}, th: {:6.2f}, dt: {:6.2f}, t: {:6.3f}, t0: {:6.2f}".format(pDes[2], state.kinematics_estimated.position.z_val, wp, wq, wr, th, self.actual_loop_time, t, t0)
+
+        self.get_logger().info(msg)
 
 
-    ##                                   ##
-    ###        Main loop                ###
-    #######################################
-    def loop(self) -> None:           
+
+    def loop(self) -> None:
+        """
+        Main loop
+        """
+        p = self.state.kinematics_estimated.position.to_numpy_array()
+        waypoints = np.array([p]).T
+
+        v = self.state.kinematics_estimated.linear_velocity.to_numpy_array()
+        a = self.state.kinematics_estimated.linear_acceleration.to_numpy_array()
+        j = np.zeros(3)
+        ic = np.array([v, a, j])
+
+        fc = np.zeros((3,3))
+
         self.publish_multirotor_state(self.state, self.sensors)
 
-        if self.cmd == None:
-            if self.state.landed_state != hrlsim.airsim.LandedState.Landed:
-                p = self.state.kinematics_estimated.position.to_numpy_array()
-                waypoints = np.array([p]).T
+        if self.cmd == None and self.state.landed_state != hrlsim.airsim.LandedState.Landed:
+
+            if self.first:
+                self.controller.setGoals(waypoints, ic, fc, 1.0)
+                self.first = False
+                self.t0 = self.get_clock().now().nanoseconds/1e9
         
-                v = self.state.kinematics_estimated.linear_velocity.to_numpy_array()
-                a = self.state.kinematics_estimated.linear_acceleration.to_numpy_array()
-                j = np.zeros(3)
-                ic = np.array([v, a, j])
-
-                fc = np.zeros((3,3))
-
-                if self.first:
-                    self.controller.setGoals(waypoints, ic, fc, 1.0)
-                    self.first = False
-                
-                t0 = self.get_clock().now().nanoseconds/1e9
-                self.move(t0, self.state)
-
-            else:
-                pass
-                #self.vel_cmd_pub.publish(self.stop_msg)
+            self.move(self.t0, self.state)
 
         elif isinstance(self.cmd, VelCmd):
             self.first = True
@@ -551,8 +545,6 @@ class Drone(Node):
             self.move(self.t0, self.state)
 
 
-
-
     def run(self) -> None:
         """
         Function to run when the process starts.
@@ -564,24 +556,32 @@ class Drone(Node):
         self.get_logger().info("Setting up ROS")
         self.setup_ros()
 
-        #self.get_logger().info("Setting up spinner thread")
-        #spinner = threading.Thread(target=rclpy.spin, args=(self,), daemon=True)
+
+        executor = MultiThreadedExecutor()
+        executor.add_node(self)
+
+
+        self.get_logger().info("Setting up spinner thread")
+        #spinner = threading.Thread(target=executor.spin, daemon=True)
         #spinner.start()
 
-        rate = self.create_rate(self.freq)
-
+        #rate = self.create_rate(self.freq, )
+        #first = True
 
         self.get_logger().info("Entering main loop")
+        executor.spin()
+        #while rclpy.ok() and self._shutdown == False:
+            #self.get_logger().info(str(self.get_clock().now().seconds_nanoseconds()))
+        #    self.publish_multirotor_state(self.state, self.sensors)
 
-        if self.executor != None:
-            self.executor.spin()
-        else:
-            rclpy.spin(self)
+        #    if self.cmd == None and self.state.landed_state != hrlsim.airsim.LandedState.Landed:
 
-            
-        #self.get_logger().info(self.drone_name + " QUITTING")
-        #self.moveToLocationActionServer.destroy()
-        #self.destroy_node()
+
+        self.get_logger().info(self.drone_name + " QUITTING")
+        executor.remove_node(self)
+        self.moveToLocationActionServer.destroy()
+        self.destroy_node()        
+        executor.shutdown()
 
 if __name__ == "__main__":
 
